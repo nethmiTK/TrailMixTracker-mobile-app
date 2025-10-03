@@ -5,9 +5,9 @@ import 'screens/main/main_screen.dart';
 import 'screens/trails/create_trail_screen.dart';
 import 'screens/search/search_screen.dart';
 import 'screens/profile/profile_screen.dart';
-import 'services/auth_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 

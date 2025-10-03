@@ -33,12 +33,17 @@ class _SignInScreenState extends State<SignInScreen> {
       if (!mounted) return;
 
       if (result['success']) {
-        // Store user data and token
-        await _userService.storeUserData(
-          result['user'],
-          result['token'],
-        );
+        // Store user data and token - don't block navigation if storage fails
+        try {
+          await _userService.storeUserData(
+            result['user'],
+            result['token'],
+          );
+        } catch (e) {
+          print('Storage failed but continuing with login: $e');
+        }
 
+        // Navigate to home regardless of storage status
         Navigator.pushReplacementNamed(context, '/home');
       } else {
         ScaffoldMessenger.of(context).showSnackBar(

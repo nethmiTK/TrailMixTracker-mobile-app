@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -10,16 +11,100 @@ import 'package:mime/mime.dart';
 
 class UserService {
   static String get baseUrl {
-    // Use localhost for web, 10.0.2.2 for Android emulator
-    return kIsWeb ? 'http://localhost:8080/api' : 'http://10.0.2.2:3000/api';
+    // Use localhost for web, mobile IP for Android devices
+    if (kIsWeb) {
+      return 'http://localhost:8080/api';
+    } else {
+      return 'http://10.49.68.38:8080/api';
+    }
   }
-  final _storage = const FlutterSecureStorage();
+
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+    ),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock_this_device,
+    ),
+    wOptions: WindowsOptions(),
+    lOptions: LinuxOptions(),
+    webOptions: WebOptions(),
+  );
+
+  // Check if secure storage is available on current platform
+  static bool get _isSecureStorageSupported {
+    if (kIsWeb) return true;
+    return Platform.isAndroid || Platform.isIOS || Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+  }
+
+  // Helper method to safely write to secure storage with platform check
+  Future<void> _secureWrite(String key, String value) async {
+    if (!_isSecureStorageSupported) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('secure_$key', value);
+      return;
+    }
+
+    try {
+      await _storage.write(key: key, value: value);
+    } on PlatformException catch (e) {
+      print('UserService - Secure storage write error: ${e.message}');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('secure_$key', value);
+    } on MissingPluginException catch (e) {
+      print('UserService - Plugin not found: ${e.message}');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('secure_$key', value);
+    } catch (e) {
+      print('UserService - Unexpected secure storage error: $e');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('secure_$key', value);
+    }
+  }
+
+  // Helper method to safely read from secure storage
+  Future<String?> _secureRead(String key) async {
+    if (!_isSecureStorageSupported) {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('secure_$key');
+    }
+
+    try {
+      return await _storage.read(key: key);
+    } on PlatformException catch (e) {
+      print('UserService - Secure storage read error: ${e.message}');
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('secure_$key');
+    } on MissingPluginException catch (e) {
+      print('UserService - Plugin not found: ${e.message}');
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('secure_$key');
+    } catch (e) {
+      print('UserService - Unexpected secure storage error: $e');
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('secure_$key');
+    }
+  }
 
   // Store user data after login
-  Future<void> storeUserData(Map<String, dynamic> userData, String token) async {
-    await _storage.write(key: 'auth_token', value: token);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_data', json.encode(userData));
+  Future<void> storeUserData(
+      Map<String, dynamic> userData, String token) async {
+    try {
+      print('UserService - Storing token and user data...');
+      await _secureWrite('auth_token', token);
+      
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_data', json.encode(userData));
+        print('UserService - Successfully stored user data');
+      } catch (e) {
+        print('UserService - Failed to store user data in SharedPreferences: $e');
+        // Continue even if SharedPreferences fails
+      }
+    } catch (e) {
+      print('UserService - Error storing user data: $e');
+      // Don't rethrow, allow login to proceed even if storage fails
+    }
   }
 
   // Get stored user data
@@ -35,7 +120,7 @@ class UserService {
   // Get user profile
   Future<Map<String, dynamic>> getUserProfile() async {
     try {
-      final token = await _storage.read(key: 'auth_token');
+      final token = await _secureRead('auth_token');
       if (token == null) {
         return {
           'success': false,
@@ -198,4 +283,4 @@ class UserService {
     await prefs.clear();
     await _storage.deleteAll();
   }
-} 
+}

@@ -118,6 +118,18 @@ app.get('/', (req, res) => {
   res.json({ message: 'Welcome to Travel Trace API' });
 });
 
+// API Test endpoint for mobile connectivity
+app.get('/api/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Server is running and accessible',
+    timestamp: new Date().toISOString(),
+    server: 'TrailMix Backend',
+    host: req.get('host'),
+    ip: req.ip
+  });
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);

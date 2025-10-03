@@ -13,11 +13,16 @@ import 'package:mime/mime.dart';
 
 class TrailService {
   static String get baseUrl {
-    // Use localhost for web, 10.0.2.2 for Android emulator
-    return kIsWeb ? 'http://localhost:8080/api' : 'http://10.0.2.2:3000/api';
+    // Use localhost for web, mobile IP for Android devices
+    if (kIsWeb) {
+      return 'http://localhost:8080/api';
+    } else {
+      return 'http://10.49.68.38:8080/api';
+    }
   }
+
   final _storage = const FlutterSecureStorage();
-  
+
   Future<Map<String, dynamic>> createTrail({
     required String name,
     required String description,
@@ -32,7 +37,7 @@ class TrailService {
   }) async {
     try {
       final token = await _storage.read(key: 'auth_token');
-      
+
       if (token == null) {
         return {
           'success': false,
@@ -42,7 +47,7 @@ class TrailService {
 
       var uri = Uri.parse('$baseUrl/trails');
       var request = http.MultipartRequest('POST', uri);
-      
+
       // Add headers
       request.headers.addAll({
         'Authorization': 'Bearer $token',
@@ -57,7 +62,8 @@ class TrailService {
       request.fields['end_lat'] = endLocation.latitude.toString();
       request.fields['end_lng'] = endLocation.longitude.toString();
       request.fields['trail_date'] = date.toIso8601String();
-      request.fields['trail_time'] = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+      request.fields['trail_time'] =
+          '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
 
       if (specialPoints != null) {
         request.fields['special_points'] = json.encode(specialPoints);
@@ -105,7 +111,7 @@ class TrailService {
       if (response.statusCode == 201) {
         // Save trail data locally
         await saveTrailLocally(responseData['data']);
-        
+
         return {
           'success': true,
           'data': responseData['data'],
@@ -156,14 +162,14 @@ class TrailService {
     try {
       final directory = await getApplicationDocumentsDirectory();
       final file = File('${directory.path}/trails.json');
-      
+
       List<Map<String, dynamic>> trails = [];
-      
+
       if (await file.exists()) {
         final contents = await file.readAsString();
         trails = List<Map<String, dynamic>>.from(json.decode(contents));
       }
-      
+
       trails.add(trailData);
       await file.writeAsString(json.encode(trails));
     } catch (e) {
@@ -176,12 +182,12 @@ class TrailService {
     try {
       final directory = await getApplicationDocumentsDirectory();
       final file = File('${directory.path}/trails.json');
-      
+
       if (await file.exists()) {
         final contents = await file.readAsString();
         return List<Map<String, dynamic>>.from(json.decode(contents));
       }
-      
+
       return [];
     } catch (e) {
       print('Error getting local trails: $e');
@@ -214,4 +220,4 @@ class TrailService {
       return [];
     }
   }
-} 
+}

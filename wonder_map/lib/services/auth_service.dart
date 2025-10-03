@@ -1,21 +1,125 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'api_config.dart';
 
 class AuthService {
-  static String get baseUrl {
-    // Use localhost for web, 10.0.2.2 for Android emulator
-    return kIsWeb ? 'http://localhost:8080/api' : 'http://10.0.2.2:3000/api';
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+    ),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock_this_device,
+    ),
+    wOptions: WindowsOptions(),
+    lOptions: LinuxOptions(),
+    webOptions: WebOptions(),
+  );
+
+  // Check if secure storage is available on current platform
+  static bool get _isSecureStorageSupported {
+    if (kIsWeb) return true;
+    return Platform.isAndroid || Platform.isIOS || Platform.isWindows || Platform.isLinux || Platform.isMacOS;
   }
-  final _storage = const FlutterSecureStorage();
+
+  // Helper method to safely write to secure storage with platform check
+  Future<void> _secureWrite(String key, String value) async {
+    if (!_isSecureStorageSupported) {
+      // Fallback to SharedPreferences for unsupported platforms
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('secure_$key', value);
+      return;
+    }
+
+    try {
+      await _storage.write(key: key, value: value);
+    } on PlatformException catch (e) {
+      print('Secure storage write error: ${e.message}');
+      print('Error code: ${e.code}');
+      // Fallback to SharedPreferences if secure storage fails
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('secure_$key', value);
+    } on MissingPluginException catch (e) {
+      print('Plugin not found: ${e.message}');
+      // Fallback to SharedPreferences if plugin is missing
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('secure_$key', value);
+    } catch (e) {
+      print('Unexpected secure storage error: $e');
+      // Fallback to SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('secure_$key', value);
+    }
+  }
+
+  // Helper method to safely read from secure storage with platform check
+  Future<String?> _secureRead(String key) async {
+    if (!_isSecureStorageSupported) {
+      // Fallback to SharedPreferences for unsupported platforms
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('secure_$key');
+    }
+
+    try {
+      return await _storage.read(key: key);
+    } on PlatformException catch (e) {
+      print('Secure storage read error: ${e.message}');
+      print('Error code: ${e.code}');
+      // Fallback to SharedPreferences if secure storage fails
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('secure_$key');
+    } on MissingPluginException catch (e) {
+      print('Plugin not found: ${e.message}');
+      // Fallback to SharedPreferences if plugin is missing
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('secure_$key');
+    } catch (e) {
+      print('Unexpected secure storage error: $e');
+      // Fallback to SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('secure_$key');
+    }
+  }
+
+  // Helper method to safely delete from secure storage with platform check
+  Future<void> _secureDelete(String key) async {
+    if (!_isSecureStorageSupported) {
+      // Fallback to SharedPreferences for unsupported platforms
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('secure_$key');
+      return;
+    }
+
+    try {
+      await _storage.delete(key: key);
+    } on PlatformException catch (e) {
+      print('Secure storage delete error: ${e.message}');
+      print('Error code: ${e.code}');
+      // Fallback to SharedPreferences if secure storage fails
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('secure_$key');
+    } on MissingPluginException catch (e) {
+      print('Plugin not found: ${e.message}');
+      // Fallback to SharedPreferences if plugin is missing
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('secure_$key');
+    } catch (e) {
+      print('Unexpected secure storage error: $e');
+      // Fallback to SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('secure_$key');
+    }
+  }
 
   // Login user
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/users/login'),
+      final response = await ApiConfig.makeRequest(
+        '/users/login',
+        method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'email': email,
@@ -23,16 +127,34 @@ class AuthService {
         }),
       );
 
+      if (response == null) {
+        return {
+          'success': false,
+          'message': ApiConfig.getNetworkErrorMessage(),
+        };
+      }
+
       final data = json.decode(response.body);
-      
+
       if (response.statusCode == 200) {
-        // Save token
-        await _storage.write(key: 'auth_token', value: data['token']);
-        
-        // Save user data
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_data', json.encode(data['user']));
-        
+        // Save token using secure storage with error handling
+        try {
+          await _secureWrite('auth_token', data['token']);
+          print('Token saved successfully');
+        } catch (e) {
+          print('Failed to save token: $e');
+        }
+
+        // Save user data - with fallback mechanism
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('user_data', json.encode(data['user']));
+          print('User data saved successfully');
+        } catch (e) {
+          print('Failed to save user data: $e');
+          // Even if storage fails, allow login to proceed
+        }
+
         return {
           'success': true,
           'token': data['token'],
@@ -48,16 +170,20 @@ class AuthService {
       print('Login error: $e');
       return {
         'success': false,
-        'message': 'Network error: Unable to connect to server',
+        'message': 'Network error: Unable to connect to server - $e',
       };
     }
   }
 
   // Register user
-  Future<Map<String, dynamic>> register(String username, String email, String password) async {
+  Future<Map<String, dynamic>> register(
+      String username, String email, String password) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/users/register'),
+      print('Attempting to register user...');
+
+      final response = await ApiConfig.makeRequest(
+        '/users/register',
+        method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'username': username,
@@ -65,6 +191,16 @@ class AuthService {
           'password': password,
         }),
       );
+
+      if (response == null) {
+        return {
+          'success': false,
+          'message': ApiConfig.getNetworkErrorMessage(),
+        };
+      }
+
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
 
       final data = json.decode(response.body);
 
@@ -80,6 +216,7 @@ class AuthService {
         };
       }
     } catch (e) {
+      print('Registration error details: $e');
       return {
         'success': false,
         'message': 'Error during registration: $e',
@@ -89,32 +226,32 @@ class AuthService {
 
   // Logout
   Future<void> logout() async {
-    await _storage.delete(key: 'auth_token');
+    await _secureDelete('auth_token');
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_data');
   }
 
   // Check if user is logged in
   Future<bool> isLoggedIn() async {
-    final token = await _storage.read(key: 'auth_token');
+    final token = await _secureRead('auth_token');
     return token != null;
   }
 
   // Get stored token
   Future<String?> getToken() async {
-    return await _storage.read(key: 'auth_token');
+    return await _secureRead('auth_token');
   }
 
   // Get user role
   Future<String?> getRole() async {
-    return await _storage.read(key: 'userRole');
+    return await _secureRead('userRole');
   }
 
   Future<Map<String, dynamic>> getCurrentUser() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final userData = prefs.getString('user_data');
-      
+
       if (userData != null) {
         return {
           'success': true,
@@ -132,4 +269,4 @@ class AuthService {
       };
     }
   }
-} 
+}
